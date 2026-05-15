@@ -441,6 +441,74 @@ def _do_clone_for_crossval(
     )
 
 
+def _do_langfuse_push(prompt_name: str, run_id: str, version: str | None) -> int:
+    from prompt_eval import langfuse_push
+    if not langfuse_push.is_configured():
+        missing = langfuse_push.missing_env_vars()
+        print(f"ERROR: push missing credentials: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    run_dir = _resolve_artifact_root() / "prompts" / prompt_name / "runs" / run_id
+    if not run_dir.exists():
+        print(f"ERROR: run not found: {run_dir}", file=sys.stderr)
+        return 2
+    return _push_run(langfuse_push, prompt_name, run_id, version, run_dir)
+
+
+def _push_run(lf, prompt_name: str, run_id: str, version: str | None, run_dir: Path) -> int:
+    dataset_path = run_dir / "dataset.json"
+    if not dataset_path.exists():
+        print(f"ERROR: dataset.json not found: {dataset_path}", file=sys.stderr)
+        return 2
+    dataset = json.loads(dataset_path.read_text())
+    meta = MetadataHelper.read(run_dir)
+    versions = [version] if version else [
+        v for v in meta.get("versions", []) if (run_dir / v / "scores.json").exists()
+    ]
+    if not versions:
+        print("No scored versions found. Run save-scores first.", file=sys.stderr)
+        return 2
+    client = lf.get_client()
+    dataset_name = lf.push_dataset(
+        client=client, prompt_name=prompt_name, run_id=run_id, dataset=dataset,
+        task_description=meta.get("task_description", ""), inputs_spec=meta.get("inputs_spec", {}),
+    )
+    _push_version_cases(lf, client, dataset_name, dataset, run_dir, run_id, prompt_name, meta.get("test_model", "unknown"), versions)
+    return _finish_push(lf, client, dataset_name, len(versions), prompt_name, run_id)
+
+
+def _push_version_cases(lf, client, dataset_name, dataset, run_dir, run_id, prompt_name, test_model, versions):
+    for ver in versions:
+        out_p, scores_p = run_dir / ver / "output.json", run_dir / ver / "scores.json"
+        if not out_p.exists() or not scores_p.exists():
+            print(f"⚠ Missing files for {ver}, skipping")
+            continue
+        outputs = json.loads(out_p.read_text())
+        cases = json.loads(scores_p.read_text())["cases"]
+        out_by_idx = {o["case_index"]: o for o in outputs}
+        for i, score in enumerate(cases):
+            idx = score.get("case_index", i)
+            out = out_by_idx.get(idx)
+            if out is None:
+                print(f"⚠ No output for case_index={idx} in {ver}, skipping")
+                continue
+            lf.push_run_case(
+                client=client, dataset_name=dataset_name, item_index=idx,
+                run_id=run_id, version=ver, prompt_name=prompt_name,
+                rendered_prompt=str(dataset[idx]["prompt_inputs"]),
+                output=out["output"], score=score["score"],
+                reasoning=score["reasoning"], model=test_model, latency_ms=0,
+            )
+
+
+def _finish_push(lf, client, dataset_name: str, n_versions: int, prompt_name: str, run_id: str) -> int:
+    ok = lf.flush_or_warn(client)
+    if ok:
+        print(f"🔭 Langfuse: pushed {dataset_name} — {n_versions} version(s)")
+    else:
+        print(f"⚠ Flush failed. Re-run: prompt-eval push --prompt {prompt_name} --run-id {run_id}")
+    return 0
+
+
 def _do_langfuse_status() -> int:
     from prompt_eval import langfuse_push  # lazy import keeps startup fast
     if langfuse_push.is_configured():
@@ -485,6 +553,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("stop-server", help="Stop the mkdocs serve process")
 
     sub.add_parser("langfuse-status", help="Check if Langfuse credentials are configured")
+
+    push_parser = sub.add_parser("push", help="Push a run's scores to Langfuse")
+    push_parser.add_argument("--prompt", required=True)
+    push_parser.add_argument("--run-id", required=True)
+    push_parser.add_argument("--version", required=False, default=None,
+                             help="Version to push (default: all scored versions)")
 
     save_dataset_parser = sub.add_parser("save-dataset", help="Save dataset.json")
     save_dataset_parser.add_argument("--prompt", required=True)
@@ -536,6 +610,9 @@ def main(argv: list | None = None) -> int:
 
     if args.cmd == "langfuse-status":
         return _do_langfuse_status()
+
+    if args.cmd == "push":
+        return _do_langfuse_push(args.prompt, args.run_id, args.version)
 
     # Handle read-only commands gracefully on fresh projects (no prompt_eval_runs/ yet)
     if args.cmd in ("list-prompts", "list-runs"):
