@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Coach, generate, evaluate, and iterate on Claude prompts with DeepEval (Claude as judge)."
 requires-python = ">=3.12"
 dependencies = [
+    "langfuse>=4.0",
     "mkdocs-material>=9.5",
     "pymdown-extensions>=10.7",
 ]
