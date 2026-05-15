@@ -441,6 +441,16 @@ def _do_clone_for_crossval(
     )
 
 
+def _do_langfuse_status() -> int:
+    from prompt_eval import langfuse_push  # lazy import keeps startup fast
+    if langfuse_push.is_configured():
+        print("configured")
+        return 0
+    missing = langfuse_push.missing_env_vars()
+    print(f"not configured: missing {', '.join(missing)}", file=sys.stderr)
+    return 1
+
+
 def _add_json_payload_args(parser: argparse.ArgumentParser) -> None:
     """Add a mutually-exclusive (--json | --json-file) payload group.
 
@@ -473,6 +483,8 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--prompt", required=True, help="prompt name, e.g. summarizer")
 
     sub.add_parser("stop-server", help="Stop the mkdocs serve process")
+
+    sub.add_parser("langfuse-status", help="Check if Langfuse credentials are configured")
 
     save_dataset_parser = sub.add_parser("save-dataset", help="Save dataset.json")
     save_dataset_parser.add_argument("--prompt", required=True)
@@ -521,6 +533,9 @@ def main(argv: list | None = None) -> int:
         _kill_mkdocs()
         print("mkdocs server stopped.")
         return 0
+
+    if args.cmd == "langfuse-status":
+        return _do_langfuse_status()
 
     # Handle read-only commands gracefully on fresh projects (no prompt_eval_runs/ yet)
     if args.cmd in ("list-prompts", "list-runs"):
