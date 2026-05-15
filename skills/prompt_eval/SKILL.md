@@ -518,6 +518,26 @@ mkdocs serve at http://127.0.0.1:8000  (log: .../mkdocs.log)
 
 **Surface that URL to the user** in your next reply, e.g. "Docs updated at http://127.0.0.1:8000 — open it in a browser to browse results as we iterate." This is how the user knows the live site is ready; don't leave it buried in CLI output.
 
+**Langfuse push (optional):**
+
+```bash
+uvx --from "${CLAUDE_SKILL_DIR}" prompt-eval langfuse-status
+```
+
+If exit code is 0 (credentials detected), ask the user via `AskUserQuestion`:
+- question: `"Langfuse credentials detected. Push this run's scores to Langfuse for team review?"`
+- options: `["Yes, push now", "No, skip"]`
+
+If user selects **"Yes, push now"**:
+```bash
+uvx --from "${CLAUDE_SKILL_DIR}" prompt-eval push \
+  --prompt {prompt} \
+  --run-id {run_id} \
+  --version v{n}
+```
+
+If exit code is non-zero or user selects "No, skip", continue to Step 4 without pushing.
+
 ---
 
 ## Step 4 — Show results & analyze failures
