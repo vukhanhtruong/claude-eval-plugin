@@ -82,6 +82,30 @@ claude-eval-plugin/
     └── llm-judge.md        # GEval grading subagent
 ```
 
+## Langfuse (optional)
+
+Push eval scores to [Langfuse](https://langfuse.com) for team review and historical comparison.
+Langfuse is purely additive — local artifacts are always written first; push failures never block the eval workflow.
+
+**Setup:** Add to your project's `.env` (see `.env.example`):
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # or your self-hosted URL
+```
+
+**How it works:** After each `save-scores` run the skill checks for credentials and prompts you to push. You can also push retroactively:
+
+```bash
+uvx --from "${CLAUDE_SKILL_DIR}" prompt-eval push \
+  --prompt summarizer \
+  --run-id run_001            # pushes all scored versions
+```
+
+Each push creates a Langfuse dataset (idempotent), one span per case, and attaches a
+`Task Quality` score (0.0–1.0, normalized from the 1–10 GEval score).
+
 ## Development
 
 ```bash
